@@ -39,10 +39,30 @@ jobs:
           
           for LABEL in $LABELS; do
             if [[ "$LABEL" == "$LABEL_NAME" ]]; then
-              EVENTS=$(gh pr view $PR_NUMBER --json timelineItems --jq '.timelineItems | map(select(.labelEvent))')
-              for EVENT in $(echo $EVENTS | jq -c '.[]'); do
-                ADDED_LABEL=$(echo $EVENT | jq --raw-output .labelEvent.name)
-                ADDED_BY=$(echo $EVENT | jq --raw-output .labelEvent.actor.login)
+              EVENTS=$(gh api graphql -f query='
+                query($prNumber: Int!) {
+                  repository(owner: "Unito-manual-tester", name: "Unito-manual-tester/roche") {
+                    pullRequest(number: $prNumber) {
+                      timelineItems(first: 100, itemTypes: [LABELED_EVENT]) {
+                        nodes {
+                          ... on LabeledEvent {
+                            label {
+                              name
+                            }
+                            actor {
+                              login
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ' -f prNumber="$PR_NUMBER" --jq '.data.repository.pullRequest.timelineItems.nodes')
+          
+              for EVENT in $(echo "$EVENTS" | jq -c '.[]'); do
+                ADDED_LABEL=$(echo "$EVENT" | jq --raw-output .label.name)
+                ADDED_BY=$(echo "$EVENT" | jq --raw-output .actor.login)
                 if [[ "$ADDED_LABEL" == "$LABEL_NAME" && "$ADDED_BY" == "$REQUIRED_USER" ]]; then
                   LABEL_ADDED_BY_USER=true
                   break
