@@ -1,0 +1,45 @@
+name: Block Merge if Specific Label Not Added by User
+
+on:
+  pull_request_target:
+    types: [labeled, synchronize, opened, reopened]
+
+jobs:
+  check-label:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v2
+
+      - name: Verify Label Added by Specific User
+        id: check_label
+        run: |
+          LABEL_NAME="Approved"
+          REQUIRED_USER="sync-by-unito"
+          
+          PR_NUMBER=$(jq --raw-output .number "$GITHUB_EVENT_PATH")
+          LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name')
+          LABEL_ADDED_BY_USER=false
+          
+          for LABEL in $LABELS; do
+            if [[ "$LABEL" == "$LABEL_NAME" ]]; then
+              EVENTS=$(gh pr view $PR_NUMBER --json timelineItems --jq '.timelineItems | map(select(.labelEvent))')
+              for EVENT in $(echo $EVENTS | jq -c '.[]'); do
+                ADDED_LABEL=$(echo $EVENT | jq --raw-output .labelEvent.name)
+                ADDED_BY=$(echo $EVENT | jq --raw-output .labelEvent.actor.login)
+                if [[ "$ADDED_LABEL" == "$LABEL_NAME" && "$ADDED_BY" == "$REQUIRED_USER" ]]; then
+                  LABEL_ADDED_BY_USER=true
+                  break
+                fi
+              done
+            fi
+          done
+          
+          echo "LABEL_ADDED_BY_USER=$LABEL_ADDED_BY_USER" >> $GITHUB_ENV
+
+      - name: Fail if Label Not Added by Specific User
+        if: env.LABEL_ADDED_BY_USER == 'false'
+        run: |
+          echo "The required label was not added by the specified user. Blocking merge."
+          exit 1
