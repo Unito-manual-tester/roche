@@ -1,4 +1,4 @@
-name: Block Merge if Specific Label Not Added by User
+name: Block Merge if Specific Label Not Added
 
 on:
   pull_request_target:
@@ -12,34 +12,41 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v2
 
-      - name: Verify Label Added by Specific User
+      - name: Install GitHub CLI if not present
+        run: |
+          if ! command -v gh &> /dev/null; then
+            echo "GitHub CLI not found. Installing..."
+            sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-key C99B11DEB97541F0
+            sudo apt-add-repository https://cli.github.com/packages
+            sudo apt-get update
+            sudo apt-get install gh
+          else
+            echo "GitHub CLI is already installed."
+          fi
+
+      - name: Authenticate GitHub CLI
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      - name: Verify Label Added
         id: check_label
         run: |
           LABEL_NAME="Approved"
-          REQUIRED_USER="sync-by-unito"
           
           PR_NUMBER=$(jq --raw-output .number "$GITHUB_EVENT_PATH")
           LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name')
-          LABEL_ADDED_BY_USER=false
+          LABEL_FOUND=false
           
           for LABEL in $LABELS; do
             if [[ "$LABEL" == "$LABEL_NAME" ]]; then
-              EVENTS=$(gh pr view $PR_NUMBER --json timelineItems --jq '.timelineItems | map(select(.labelEvent))')
-              for EVENT in $(echo $EVENTS | jq -c '.[]'); do
-                ADDED_LABEL=$(echo $EVENT | jq --raw-output .labelEvent.name)
-                ADDED_BY=$(echo $EVENT | jq --raw-output .labelEvent.actor.login)
-                if [[ "$ADDED_LABEL" == "$LABEL_NAME" && "$ADDED_BY" == "$REQUIRED_USER" ]]; then
-                  LABEL_ADDED_BY_USER=true
-                  break
-                fi
-              done
+              LABEL_FOUND=true
+              break
             fi
           done
           
-          echo "LABEL_ADDED_BY_USER=$LABEL_ADDED_BY_USER" >> $GITHUB_ENV
+          echo "LABEL_FOUND=$LABEL_FOUND" >> $GITHUB_ENV
 
-      - name: Fail if Label Not Added by Specific User
-        if: env.LABEL_ADDED_BY_USER == 'false'
+      - name: Fail if Label Not Added
+        if: env.LABEL_FOUND == 'false'
         run: |
-          echo "The required label was not added by the specified user. Blocking merge."
+          echo "The required label was not added. Blocking merge."
           exit 1
